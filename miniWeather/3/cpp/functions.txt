@@ -1,0 +1,294 @@
+    
+  subroutine injection(x,z,r,u,w,t,hr,ht)
+    implicit none
+    real(rp), intent(in   ) :: x, z        !x- and z- location of the point being sampled
+    real(rp), intent(  out) :: r, u, w, t  !Density, uwind, wwind, and potential temperature
+    real(rp), intent(  out) :: hr, ht      !Hydrostatic density and potential temperature
+    call hydro_const_theta(z,hr,ht)
+    r = 0
+    t = 0
+    u = 0
+    w = 0
+  end subroutine injection
+
+
+  subroutine density_current(x,z,r,u,w,t,hr,ht)
+    implicit none
+    real(rp), intent(in   ) :: x, z        !x- and z- location of the point being sampled
+    real(rp), intent(  out) :: r, u, w, t  !Density, uwind, wwind, and potential temperature
+    real(rp), intent(  out) :: hr, ht      !Hydrostatic density and potential temperature
+    call hydro_const_theta(z,hr,ht)
+    r = 0
+    t = 0
+    u = 0
+    w = 0
+    t = t + sample_ellipse_cosine(x,z,-20._rp ,xlen/2,5000._rp,4000._rp,2000._rp)
+  end subroutine density_current
+
+
+  subroutine gravity_waves(x,z,r,u,w,t,hr,ht)
+    implicit none
+    real(rp), intent(in   ) :: x, z        !x- and z- location of the point being sampled
+    real(rp), intent(  out) :: r, u, w, t  !Density, uwind, wwind, and potential temperature
+    real(rp), intent(  out) :: hr, ht      !Hydrostatic density and potential temperature
+    call hydro_const_bvfreq(z,0.02_rp,hr,ht)
+    r = 0
+    t = 0
+    u = 15
+    w = 0
+  end subroutine gravity_waves
+
+
+  !Rising thermal
+  subroutine thermal(x,z,r,u,w,t,hr,ht)
+    implicit none
+    real(rp), intent(in   ) :: x, z        !x- and z- location of the point being sampled
+    real(rp), intent(  out) :: r, u, w, t  !Density, uwind, wwind, and potential temperature
+    real(rp), intent(  out) :: hr, ht      !Hydrostatic density and potential temperature
+    call hydro_const_theta(z,hr,ht)
+    r = 0
+    t = 0
+    u = 0
+    w = 0
+    t = t + sample_ellipse_cosine(x,z, 3._rp ,xlen/2,2000._rp,2000._rp,2000._rp)
+  end subroutine thermal
+
+
+  !Colliding thermals
+  subroutine collision(x,z,r,u,w,t,hr,ht)
+    implicit none
+    real(rp), intent(in   ) :: x, z        !x- and z- location of the point being sampled
+    real(rp), intent(  out) :: r, u, w, t  !Density, uwind, wwind, and potential temperature
+    real(rp), intent(  out) :: hr, ht      !Hydrostatic density and potential temperature
+    call hydro_const_theta(z,hr,ht)
+    r = 0
+    t = 0
+    u = 0
+    w = 0
+    t = t + sample_ellipse_cosine(x,z, 20._rp,xlen/2,2000._rp,2000._rp,2000._rp)
+    t = t + sample_ellipse_cosine(x,z,-20._rp,xlen/2,8000._rp,2000._rp,2000._rp)
+  end subroutine collision
+
+
+  !Establish hydrostatic balance using constant potential temperature (thermally neutral atmosphere)
+  subroutine hydro_const_theta(z,r,t)
+    implicit none
+    real(rp), intent(in   ) :: z  !x- and z- location of the point being sampled
+    real(rp), intent(  out) :: r, t  !Density and potential temperature at this point
+    real(rp), parameter :: theta0 = 300._rp  !Background potential temperature
+    real(rp), parameter :: exner0 = 1._rp    !Surface-level Exner pressure
+    real(rp) :: p,exner,rt
+    !Establish hydrostatic balance first using Exner pressure
+    t = theta0                                  !Potential Temperature at z
+    exner = exner0 - grav * z / (cp * theta0)   !Exner pressure at z
+    p = p0 * exner**(cp/rd)                     !Pressure at z
+    rt = (p / c0)**(1._rp / gamma)              !rho*theta at z
+    r = rt / t                                  !Density at z
+  end subroutine hydro_const_theta
+
+  !Establish hydrostatic balance using constant Brunt-Vaisala frequency
+  subroutine hydro_const_bvfreq( z , bv_freq0 , r , t )
+    implicit none
+    real(rp), intent(in   ) :: z , bv_freq0
+    real(rp), intent(  out) :: r , t
+    real(rp) :: theta0 = 300, exner0 = 1
+    real(rp) :: p, exner, rt
+    t = theta0 * exp( bv_freq0**2 / grav * z )                                  !Pot temp at z
+    exner = exner0 - grav**2 / (cp * bv_freq0**2) * (t - theta0) / (t * theta0) !Exner pressure at z
+    p = p0 * exner**(cp/rd)                                                     !Pressure at z
+    rt = (p / c0)**(1._rp / gamma)                                              !rho*theta at z
+    r = rt / t                                                                  !Density at z
+  end subroutine hydro_const_bvfreq
+
+
+  !Sample from an ellipse of a specified center, radius, and amplitude at a specified location
+  function sample_ellipse_cosine( x , z , amp , x0 , z0 , xrad , zrad )   result(val)
+    implicit none
+    real(rp), intent(in) :: x , z         !Location to sample
+    real(rp), intent(in) :: amp           !Amplitude of the bubble
+    real(rp), intent(in) :: x0 , z0       !Center of the bubble
+    real(rp), intent(in) :: xrad , zrad   !Radius of the bubble
+    real(rp)             :: val           !The output sampled value
+    real(rp) :: dist
+    !Compute distance from bubble center
+    dist = sqrt( ((x-x0)/xrad)**2 + ((z-z0)/zrad)**2 ) * pi / 2._rp
+    !If the distance from bubble center is less than the radius, create a cos**2 profile
+    if (dist <= pi / 2._rp) then
+      val = amp * cos(dist)**2
+    else
+      val = 0._rp
+    endif
+  end function sample_ellipse_cosine
+
+  !Deallocate and call MPI_Finalize
+  subroutine finalize()
+    implicit none
+    integer :: ierr
+    deallocate(state             )
+    deallocate(state_tmp         )
+    deallocate(flux              )
+    deallocate(tend              )
+    deallocate(hy_dens_cell      )
+    deallocate(hy_dens_theta_cell)
+    deallocate(hy_dens_int       )
+    deallocate(hy_dens_theta_int )
+    deallocate(hy_pressure_int   )
+    deallocate(sendbuf_l)
+    deallocate(sendbuf_r)
+    deallocate(recvbuf_l)
+    deallocate(recvbuf_r)
+    call MPI_Finalize(ierr)
+  end subroutine finalize
+
+
+  !Error reporting routine for the PNetCDF I/O
+  subroutine ncwrap( ierr , line )
+    use pnetcdf
+    implicit none
+    integer, intent(in) :: ierr
+    integer, intent(in) :: line
+    if (ierr /= nf_noerr) then
+      write(*,*) 'NetCDF Error at line: ', line
+      write(*,*) nf90mpi_strerror(ierr)
+      stop
+    endif
+  end subroutine ncwrap
+
+
+  !Compute reduced quantities for error checking without resorting to the "ncdiff" tool
+  subroutine reductions( mass , te )
+    implicit none
+    real(rp), intent(out) :: mass, te
+    integer :: i, k, ierr
+    real(rp) :: r,u,w,th,p,t,ke,ie
+    real(rp) :: glob(2)
+    mass = 0
+    te   = 0
+    !$acc parallel loop collapse(2) reduction(+:mass,te)
+    do k = 1 , nz
+      do i = 1 , nx
+        r  =   state(i,k,ID_DENS) + hy_dens_cell(k)             ! Density
+        u  =   state(i,k,ID_UMOM) / r                           ! U-wind
+        w  =   state(i,k,ID_WMOM) / r                           ! W-wind
+        th = ( state(i,k,ID_RHOT) + hy_dens_theta_cell(k) ) / r ! Potential Temperature (theta)
+        p  = C0*(r*th)**gamma      ! Pressure
+        t  = th / (p0/p)**(rd/cp)  ! Temperature
+        ke = r*(u*u+w*w)           ! Kinetic Energy
+        ie = r*cv*t                ! Internal Energy
+        mass = mass + r            *dx*dz ! Accumulate domain mass
+        te   = te   + (ke + r*cv*t)*dx*dz ! Accumulate domain total energy
+      enddo
+    enddo
+    call mpi_allreduce((/mass,te/),glob,2,mpi_type,MPI_SUM,MPI_COMM_WORLD,ierr)
+    mass = glob(1)
+    te   = glob(2)
+  end subroutine reductions
+
+  !Output the fluid state (state) to a NetCDF file at a given elapsed model time (etime)
+  !The file I/O uses parallel-netcdf, the only external library required for this mini-app.
+  !If it's too cumbersome, you can comment the I/O out, but you'll miss out on some potentially cool graphics
+  subroutine output(state,etime)
+    use pnetcdf
+    use mpi
+    implicit none
+    real(rp), intent(in) :: state(1-hs:nx+hs,1-hs:nz+hs,NUM_VARS)
+    real(rp), intent(in) :: etime
+    integer :: ncid, t_dimid, x_dimid, z_dimid, dens_varid, uwnd_varid, wwnd_varid, theta_varid, t_varid
+    integer :: i,k
+    integer, save :: num_out = 0
+    integer(kind=MPI_OFFSET_KIND) :: len, st1(1),ct1(1),st3(3),ct3(3)
+    !Temporary arrays to hold density, u-wind, w-wind, and potential temperature (theta)
+    real(rp), allocatable :: dens(:,:), uwnd(:,:), wwnd(:,:), theta(:,:)
+    real(rp) :: etimearr(1)
+    !Inform the user
+    if (mainproc) write(*,*) '*** OUTPUT ***'
+    !Allocate some (big) temp arrays
+    allocate(dens (nx,nz))
+    allocate(uwnd (nx,nz))
+    allocate(wwnd (nx,nz))
+    allocate(theta(nx,nz))
+
+    !If the elapsed time is zero, create the file. Otherwise, open the file
+    if (etime == 0) then
+      !Create the file
+      call ncwrap( nf90mpi_create( MPI_COMM_WORLD , 'output.nc' , nf90_clobber , MPI_INFO_NULL , ncid ) , __LINE__ )
+      !Create the dimensions
+      len=nf90_unlimited; call ncwrap( nfmpi_def_dim( ncid , 't' , len , t_dimid ) , __LINE__ )
+      len=nx_glob       ; call ncwrap( nfmpi_def_dim( ncid , 'x' , len , x_dimid ) , __LINE__ )
+      len=nz_glob       ; call ncwrap( nfmpi_def_dim( ncid , 'z' , len , z_dimid ) , __LINE__ )
+      !Create the variables
+#ifdef SINGLE_PREC
+      call ncwrap( nfmpi_def_var( ncid , 't' , nf90_real , 1 , (/ t_dimid /) , t_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'dens'  , nf90_real , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  dens_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'uwnd'  , nf90_real , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  uwnd_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'wwnd'  , nf90_real , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  wwnd_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'theta' , nf90_real , 3 , (/ x_dimid , z_dimid , t_dimid /) , theta_varid ) , __LINE__ )
+#else
+      call ncwrap( nfmpi_def_var( ncid , 't' , nf90_double , 1 , (/ t_dimid /) , t_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'dens'  , nf90_double , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  dens_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'uwnd'  , nf90_double , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  uwnd_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'wwnd'  , nf90_double , 3 , (/ x_dimid , z_dimid , t_dimid /) ,  wwnd_varid ) , __LINE__ )
+      call ncwrap( nfmpi_def_var( ncid , 'theta' , nf90_double , 3 , (/ x_dimid , z_dimid , t_dimid /) , theta_varid ) , __LINE__ )
+#endif
+      !End "define" mode
+      call ncwrap( nfmpi_enddef( ncid ) , __LINE__ )
+    else
+      !Open the file
+      call ncwrap( nfmpi_open( MPI_COMM_WORLD , 'output.nc' , nf90_write , MPI_INFO_NULL , ncid ) , __LINE__ )
+      !Get the variable IDs
+      call ncwrap( nfmpi_inq_varid( ncid , 'dens'  ,  dens_varid ) , __LINE__ )
+      call ncwrap( nfmpi_inq_varid( ncid , 'uwnd'  ,  uwnd_varid ) , __LINE__ )
+      call ncwrap( nfmpi_inq_varid( ncid , 'wwnd'  ,  wwnd_varid ) , __LINE__ )
+      call ncwrap( nfmpi_inq_varid( ncid , 'theta' , theta_varid ) , __LINE__ )
+      call ncwrap( nfmpi_inq_varid( ncid , 't'     ,     t_varid ) , __LINE__ )
+    endif
+
+    !Store perturbed values in the temp arrays for output
+    do k = 1 , nz
+      do i = 1 , nx
+        dens (i,k) = state(i,k,ID_DENS)
+        uwnd (i,k) = state(i,k,ID_UMOM) / ( hy_dens_cell(k) + state(i,k,ID_DENS) )
+        wwnd (i,k) = state(i,k,ID_WMOM) / ( hy_dens_cell(k) + state(i,k,ID_DENS) )
+        theta(i,k) = ( state(i,k,ID_RHOT) + hy_dens_theta_cell(k) ) / ( hy_dens_cell(k) + state(i,k,ID_DENS) ) - hy_dens_theta_cell(k) / hy_dens_cell(k)
+      enddo
+    enddo
+
+    !Write the grid data to file with all the processes writing collectively
+#ifdef SINGLE_PREC
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_real_all( ncid ,  dens_varid , st3 , ct3 , dens  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_real_all( ncid ,  uwnd_varid , st3 , ct3 , uwnd  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_real_all( ncid ,  wwnd_varid , st3 , ct3 , wwnd  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_real_all( ncid , theta_varid , st3 , ct3 , theta ) , __LINE__ )
+#else
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_double_all( ncid ,  dens_varid , st3 , ct3 , dens  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_double_all( ncid ,  uwnd_varid , st3 , ct3 , uwnd  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_double_all( ncid ,  wwnd_varid , st3 , ct3 , wwnd  ) , __LINE__ )
+    st3=(/i_beg,k_beg,num_out+1/); ct3=(/nx,nz,1/); call ncwrap( nfmpi_put_vara_double_all( ncid , theta_varid , st3 , ct3 , theta ) , __LINE__ )
+#endif
+
+    !Only the main process needs to write the elapsed time
+    !Begin "independent" write mode
+    call ncwrap( nfmpi_begin_indep_data(ncid) , __LINE__ )
+    !write elapsed time to file
+    if (mainproc) then
+#ifdef SINGLE_PREC
+      st1=(/num_out+1/); ct1=(/1/); etimearr(1) = etime; call ncwrap( nfmpi_put_vara_real( ncid , t_varid , st1 , ct1 , etimearr ) , __LINE__ )
+#else
+      st1=(/num_out+1/); ct1=(/1/); etimearr(1) = etime; call ncwrap( nfmpi_put_vara_double( ncid , t_varid , st1 , ct1 , etimearr ) , __LINE__ )
+#endif
+    endif
+    !End "independent" write mode
+    call ncwrap( nfmpi_end_indep_data(ncid) , __LINE__ )
+
+    !Close the file
+    call ncwrap( nf90mpi_close(ncid) , __LINE__ )
+
+    !Increment the number of outputs
+    num_out = num_out + 1
+
+    !Deallocate the temp arrays
+    deallocate(dens )
+    deallocate(uwnd )
+    deallocate(wwnd )
+    deallocate(theta)
+  end subroutine output
